@@ -29,78 +29,59 @@ The script performs the following for each target:
 
 ### Phase C: Monitoring (7-14 Days)
 The datasets remain in this restricted state for a minimum of 7 days (matching BigQuery's Time Travel window).
-- **Observation:** Monitor for failed jobs, broken dashboards, or user tickets.
-- **Validation:** (Optional) Use `INFORMATION_SCHEMA.JOBS_BY_PROJECT` to confirm zero read attempts during this period.
 
 ### Phase D: Final Deletion (Automated)
-After the monitoring period (default 7 days), use the `--phase-d` flag to permanently delete the datasets. The script will only delete datasets that have exceeded the retention threshold.
-
-**Run a deletion dry-run:**
-```bash
-python3 bq_data_decommissioner.py --phase-d --dry-run
-```
-
-**Execute final deletion:**
-```bash
-python3 bq_data_decommissioner.py --phase-d
-```
-
-**Customise retention period (e.g., 14 days):**
-```bash
-python3 bq_data_decommissioner.py --phase-d --retention-days 14
-```
+After the monitoring period (default 7 days), use the `--phase-d` flag to permanently delete the datasets.
 
 ---
 
-## 3. Operational Commands
+## 3. EMERGENCY RECOVERY PROCESS
+If a user or automated system "screams" (reports access denied), follow these steps to restore access immediately.
 
-### Listing Available Tranches
-View the exact tranche names from your updated audit file:
+### Step 1: Identify the Target
+Locate the project and dataset name from the user report.
+
+### Step 2: Run the Restoration Tool
+The `bq_restore_access.py` tool is designed for rapid recovery. It automatically identifies the backup location in GCS and reapplies the original policy.
+
+**To restore a specific dataset:**
 ```bash
-python3 bq_data_decommissioner.py --list-tranches
+python3 bq_restore_access.py --dataset project_id:dataset_id
 ```
 
-### Performing a Dry Run (Highly Recommended)
-Verify exactly which datasets will be affected without making any changes:
-```bash
-# Supports sub-tranches (e.g., 1.1, 2.1)
-python3 bq_data_decommissioner.py --tranche 1.1 --dry-run
-```
-
-### Initiating the Scream Test
-Execute the actual access restriction and cloud backup:
-```bash
-python3 bq_data_decommissioner.py --tranche 1.1
-```
-
-### Emergency Rollback (Automated)
-If access needs to be restored, use the `bq_restore_access.py` tool. It automatically handles downloading backups from GCS and reapplying them.
-
-**Restore a specific dataset:**
-```bash
-python3 bq_restore_access.py --dataset project:dataset
-```
-
-**Restore an entire tranche:**
+**To restore an entire tranche (if a systemic issue is found):**
 ```bash
 python3 bq_restore_access.py --tranche 1.1
 ```
 
-**Restore everything in the current state file:**
+**To restore everything (emergency "undo" for all active tests):**
 ```bash
 python3 bq_restore_access.py --all
 ```
 
-**Verify before restoring:**
+### Step 3: Manual Verification (If script fails)
+If the script cannot run, you can manually re-apply the policy using the `bq` CLI:
+1. Locate the backup JSON: `gsutil ls gs://bq-admin-backup/backups/`
+2. Download the backup: `gsutil cp gs://bq-admin-backup/backups/[project]_[dataset]_backup.json .`
+3. Apply the policy: `bq update --source [project]_[dataset]_backup.json [project]:[dataset]`
+
+---
+
+## 4. Operational Commands
+
+### Listing Available Tranches
 ```bash
-python3 bq_restore_access.py --tranche 1.1 --dry-run
+python3 bq_data_decommissioner.py --list-tranches
+```
+
+### Performing a Dry Run
+```bash
+python3 bq_data_decommissioner.py --tranche 1.1 --dry-run
 ```
 
 ---
 
-## 4. Safety Nets & Best Practices
+## 5. Safety Nets & Best Practices
 - **Org-Level Access:** As an Org Admin, you retain access even when dataset-level permissions are stripped. You can always manage or rollback resources.
-- **Sub-Tranche Support:** The script supports decimal tranche identifiers (e.g., `1.1`) to match your refined audit groupings.
-- **Time Travel:** BigQuery retains data for 7 days after deletion. This is your final safety net.
-- **IaC Alignment:** For FAST-managed projects, ensure the final deletion is mirrored in the relevant Terraform/YAML configuration to prevent resources from being recreated.
+- **Time Travel:** BigQuery retains data for 7 days after deletion. This is your final safety net for accidental deletions.
 - **Automated Validation:** The decommissioning logic is verified by `test_bq_decommissioner.py`. Always run the test suite after making modifications to the execution logic.
