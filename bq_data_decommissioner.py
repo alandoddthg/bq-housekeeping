@@ -72,7 +72,8 @@ def apply_scream_test(project, dataset, backup_path, dry_run=False):
     
     # 1. Label the dataset for visibility
     label_cmd = f"bq update --set_label cleanup-status:scream-test {project}:{dataset}"
-    run_command(label_cmd, dry_run)
+    if not run_command(label_cmd, dry_run):
+        log(f"WARNING: Failed to label {project}:{dataset} - continuing with access restriction")
 
     if dry_run:
         log(f"[DRY-RUN] Would update access for {project}:{dataset} to strip non-OWNER principals")
@@ -253,6 +254,7 @@ def main():
             
         # 2. Scream Test
         if apply_scream_test(project, dataset, backup_path, dry_run=args.dry_run):
+            log(f"Scream test applied successfully for {key}")
             if not args.dry_run:
                 state[key] = {
                     "project": project,
@@ -262,6 +264,8 @@ def main():
                     "scream_initiated_at": datetime.datetime.now().isoformat(),
                     "status": "scream_test"
                 }
+        else:
+            log(f"ERROR: Failed to apply scream test for {key} - dataset access NOT modified")
 
     if not args.dry_run:
         with open(STATE_FILE, "w") as f:

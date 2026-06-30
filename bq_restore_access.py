@@ -3,6 +3,7 @@ import subprocess
 import os
 import datetime
 import argparse
+import sys
 
 # --- CONFIGURATION ---
 STATE_FILE = "state.json"
@@ -88,32 +89,48 @@ def main():
             print(f"No datasets found for tranche {args.tranche} in state file.")
             return
     elif args.all:
-        targets = state
+        targets = {k: v for k, v in state.items() if v.get("status") == "scream_test"}
     else:
         print("Error: Specify --dataset, --tranche, or --all.")
         return
 
     log(f"Initiating restoration for {len(targets)} datasets...")
-    
+
     restored_keys = []
+    failed_keys = []
     for key, info in targets.items():
         if info.get("status") == "restored":
             log(f"Skipping {key} - already marked as restored.")
             continue
-            
+
         if restore_dataset(key, info, args.dry_run):
             if not args.dry_run:
                 restored_keys.append(key)
+        else:
+            failed_keys.append(key)
+            log(f"ERROR: Failed to restore {key}")
 
     # Update state file
     if restored_keys:
         for key in restored_keys:
             state[key]["status"] = "restored"
             state[key]["restored_at"] = datetime.datetime.now().isoformat()
-        
+
         with open(STATE_FILE, "w") as f:
             json.dump(state, f, indent=2)
         log("State file updated.")
+
+        # Sync state back to GCS so it stays consistent with local
+        backup_bucket = next(
+            (v.get("backup_path", "").split("/")[2] for v in state.values() if v.get("backup_path", "").startswith("gs://")),
+            None
+        )
+        if backup_bucket:
+            run_command(f"gsutil cp {STATE_FILE} gs://{backup_bucket}/workspace/{STATE_FILE}")
+
+    if failed_keys:
+        log(f"RESTORATION INCOMPLETE: {len(failed_keys)} dataset(s) failed to restore: {', '.join(failed_keys)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
