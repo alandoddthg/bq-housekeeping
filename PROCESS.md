@@ -2,6 +2,8 @@
 
 This document outlines the automated process for safely decommissioning BigQuery datasets within the THG estate. It utilises the `bq_data_decommissioner.py` tool to automate backups, access restriction (Scream Test), and tracking.
 
+---
+
 ## 1. Prerequisites
 - **CLI Tools:** `gcloud` and `bq` must be authenticated and operational.
 - **Permissions:** Organisation Admin access (required to modify access policies across projects).
@@ -101,3 +103,4 @@ python3 bq_restore_access.py --tranche 1.1 --dry-run
 - **Sub-Tranche Support:** The script supports decimal tranche identifiers (e.g., `1.1`) to match your refined audit groupings.
 - **Time Travel:** BigQuery retains data for 7 days after deletion. This is your final safety net.
 - **IaC Alignment:** For FAST-managed projects, ensure the final deletion is mirrored in the relevant Terraform/YAML configuration to prevent resources from being recreated.
+- **Automated Validation:** The decommissioning logic is verified by `test_bq_decommissioner.py`. Always run the test suite after making modifications to the execution logic.
