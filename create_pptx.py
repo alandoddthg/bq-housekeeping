@@ -153,18 +153,26 @@ def create_presentation():
 
     # --- Slide 5: The Numbers ---
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    add_header(slide, "A clear view of the numbers")
+    add_header(slide, "Targeted Savings & Repository")
     
-    # Placeholder for table or KPI
-    infobox = slide.shapes.add_textbox(Inches(0.5), Inches(2), Inches(12), Inches(3))
+    infobox = slide.shapes.add_textbox(Inches(0.5), Inches(2), Inches(12), Inches(3.5))
     tf = infobox.text_frame
     p = tf.add_paragraph()
     p.text = "Audit complete across 50+ projects."
     p2 = tf.add_paragraph()
-    p2.text = "Tranche 1 (Abandoned) targets: 120+ datasets."
+    p2.text = "Identified 120+ Stale/Abandoned datasets (Tranche 1-3)."
     p3 = tf.add_paragraph()
-    p3.text = "Estimated annual savings: $42,000+ (Storage only)."
+    p3.text = "Estimated annual savings: $28,400+ (Stale Data Storage Only)."
+    p4 = tf.add_paragraph()
+    p4.text = "\nCode & Documentation Repository:"
+    p5 = tf.add_paragraph()
+    p5.text = "https://github.com/alandoddthg/bq-housekeeping"
+    
     apply_style(tf, font_name=BODY_FONT, size=Pt(32), color=THG_DARK)
+    # Highlight the URL
+    tf.paragraphs[4].runs[0].font.size = Pt(24)
+    tf.paragraphs[4].runs[0].font.color.rgb = THG_BLUE
+    tf.paragraphs[4].runs[0].font.bold = True
 
     prs.save("BigQuery_Housekeeping_Process.pptx")
 
