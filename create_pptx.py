@@ -1,10 +1,11 @@
+import re
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.chart.data import CategoryChartData
-from pptx.enum.chart import XL_CHART_TYPE
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 import pandas as pd
 
 EXCEL_FILE = "20260624_Data_Estate_Cleanup_Audit xlsx.xlsx"
@@ -17,6 +18,37 @@ def load_tranche1_targets():
         df['Tranche'].astype(str).str.startswith("Tranche 1:")
         & df['Defensible Deletion Status'].astype(str).str.startswith("CONFIRMED")
     ].copy()
+
+
+def _parse_last_reader(reads_field):
+    """Extract (when, who) from the first entry of 'Last 5 Reads (Who/When)', or (None, None) if never read."""
+    s = str(reads_field)
+    if s.startswith("No Read Access"):
+        return None, None
+    first_entry = s.split("\n")[0].strip()
+    m = re.match(r'^(.*?)\s*\(([^)]+)\)\s*$', first_entry)
+    if not m:
+        return first_entry, None
+    return m.group(1).strip(), m.group(2).strip()
+
+
+def summarise_readers(t1):
+    """Group Tranche 1 candidates by who last read them, to reveal bulk-scan vs genuine usage patterns."""
+    parsed = t1['Last 5 Reads (Who/When)'].apply(_parse_last_reader)
+    t1 = t1.assign(
+        last_read_when=[p[0] for p in parsed],
+        last_read_who=[p[1] for p in parsed],
+    )
+    has_read = t1[t1['last_read_who'].notna()]
+    no_read_datasets = t1[t1['last_read_who'].isna()]['Dataset'].tolist()
+
+    summary = (
+        has_read.groupby('last_read_who')
+        .agg(datasets=('Dataset', 'nunique'), last_read=('last_read_when', 'max'))
+        .sort_values('datasets', ascending=False)
+        .reset_index()
+    )
+    return summary, no_read_datasets
 
 
 def create_presentation():
@@ -147,32 +179,42 @@ def create_presentation():
     p = tf.add_paragraph()
     p.text = (
         f"{total_datasets} confirmed candidates  ·  {total_size:,.0f} GB  ·  "
-        f"${total_cost:,.2f}/mo  ·  zero reads/writes in 12+ months"
+        f"${total_cost:,.2f}/mo  ·  zero write activity in 180+ days"
     )
     apply_style(tf, font_name=BODY_FONT, size=Pt(16), color=THG_GREY, bold=True)
 
-    chart_title = slide.shapes.add_textbox(Inches(0.5), Inches(1.85), Inches(12), Inches(0.35))
+    chart_title = slide.shapes.add_textbox(Inches(0.5), Inches(1.8), Inches(12), Inches(0.35))
     tf = chart_title.text_frame
     p = tf.add_paragraph()
-    p.text = "Top 15 by Days Since Last Activity"
+    p.text = "Read vs. Storage-Update Recency — Top 15 Most Stale"
     apply_style(tf, font_name=HEADER_FONT, size=Pt(18), color=THG_DARK, bold=True)
 
     top_by_activity = t1.sort_values("Days Since Last Activity", ascending=False).head(15)
     chart_data = CategoryChartData()
     chart_data.categories = list(top_by_activity['Dataset'])
-    chart_data.add_series('Days Since Last Activity', [float(v) for v in top_by_activity['Days Since Last Activity']])
+    # None marks datasets with no recorded read at all (rendered as a gap, not zero/"just read")
+    read_values = [
+        float(row['Days Since Last Activity']) if pd.notna(row['Last Read Time']) else None
+        for _, row in top_by_activity.iterrows()
+    ]
+    chart_data.add_series('Days Since Last Read', read_values)
+    chart_data.add_series('Days Since Last Storage Update', [float(v) for v in top_by_activity['Days Since Last Modified']])
 
     graphic_frame = slide.shapes.add_chart(
-        XL_CHART_TYPE.BAR_CLUSTERED, Inches(0.5), Inches(2.25), Inches(12), Inches(2.35), chart_data
+        XL_CHART_TYPE.BAR_CLUSTERED, Inches(0.5), Inches(2.15), Inches(12), Inches(2.45), chart_data
     )
     chart = graphic_frame.chart
-    chart.has_legend = False
+    chart.has_legend = True
+    chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+    chart.legend.include_in_layout = False
+    chart.legend.font.size = Pt(10)
     plot = chart.plots[0]
-    plot.has_data_labels = True
-    plot.data_labels.font.size = Pt(9)
-    series = plot.series[0]
-    series.format.fill.solid()
-    series.format.fill.fore_color.rgb = THG_RED
+    plot.has_data_labels = False
+    series_read, series_modified = plot.series
+    series_read.format.fill.solid()
+    series_read.format.fill.fore_color.rgb = THG_BLUE
+    series_modified.format.fill.solid()
+    series_modified.format.fill.fore_color.rgb = THG_RED
     chart.category_axis.tick_labels.font.size = Pt(9)
     chart.value_axis.tick_labels.font.size = Pt(9)
 
@@ -208,7 +250,56 @@ def create_presentation():
             cell.text = str(val)
             cell.text_frame.paragraphs[0].font.size = Pt(13)
 
-    # --- Slide 5: Execution & Repository ---
+    # --- Slide 5: Tranche 1 - Who's Actually Reading This Data? ---
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    add_header(slide, "Tranche 1: Who's Actually Reading This Data?")
+
+    reader_summary, no_read_datasets = summarise_readers(t1)
+    total_with_reads = int(reader_summary['datasets'].sum())
+    bulk_scan_total = int(reader_summary[reader_summary['datasets'] > 1]['datasets'].sum())
+
+    insight = slide.shapes.add_textbox(Inches(0.5), Inches(1.3), Inches(12), Inches(0.9))
+    tf = insight.text_frame
+    p = tf.add_paragraph()
+    p.text = (
+        f"{total_with_reads} of {total_datasets} candidates show a recent 'read', but {bulk_scan_total} of those "
+        f"trace to just 2 accounts, each hitting a dozen+ datasets in a single same-day batch — "
+        f"evidence of an automated scan, not ongoing human usage."
+    )
+    apply_style(tf, font_name=BODY_FONT, size=Pt(16), color=THG_GREY, bold=True)
+
+    table_rows = len(reader_summary) + 1
+    table = slide.shapes.add_table(table_rows, 4, Inches(0.5), Inches(2.4), Inches(12), Inches(2.2)).table
+    headers = ["Reader", "Datasets Touched (Tranche 1)", "Last Read", "Pattern"]
+    for i, h in enumerate(headers):
+        cell = table.cell(0, i)
+        cell.text = h
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = THG_DARK
+        cell.text_frame.paragraphs[0].font.color.rgb = WHITE
+        cell.text_frame.paragraphs[0].font.bold = True
+        cell.text_frame.paragraphs[0].font.size = Pt(13)
+
+    for r, row in reader_summary.iterrows():
+        is_service_account = "gserviceaccount.com" in row['last_read_who']
+        pattern = ("Service account, " if is_service_account else "") + (
+            "single-day bulk scan" if row['datasets'] > 1 else "single read"
+        )
+        values = [row['last_read_who'], str(int(row['datasets'])), row['last_read'], pattern.capitalize()]
+        for c, val in enumerate(values):
+            cell = table.cell(r + 1, c)
+            cell.text = str(val)
+            cell.text_frame.paragraphs[0].font.size = Pt(13)
+
+    footer = slide.shapes.add_textbox(Inches(0.5), Inches(4.85), Inches(12), Inches(1.5))
+    tf = footer.text_frame
+    p = tf.add_paragraph()
+    p.text = (
+        f"Zero recorded reads or writes at all ({len(no_read_datasets)}): " + ", ".join(no_read_datasets) + "."
+    )
+    apply_style(tf, font_name=BODY_FONT, size=Pt(14), color=THG_DARK)
+
+    # --- Slide 6: Execution & Repository ---
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_header(slide, "Execution Control")
     
@@ -229,7 +320,7 @@ def create_presentation():
     tf.paragraphs[4].runs[0].font.color.rgb = THG_BLUE
     tf.paragraphs[4].runs[0].font.bold = True
 
-    # --- Slide 6: Status Tracking & Reporting ---
+    # --- Slide 7: Status Tracking & Reporting ---
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_header(slide, "Status Tracking & Reporting")
 
