@@ -55,7 +55,7 @@ def create_presentation():
     context = slide.shapes.add_textbox(Inches(0.5), Inches(6.5), Inches(12), Inches(0.5))
     tf = context.text_frame
     p = tf.add_paragraph()
-    p.text = "EXECUTIVE REVIEW  ·  CLOUD FINOPS  ·  JUNE 2026"
+    p.text = "EXECUTIVE REVIEW  ·  CLOUD FINOPS  ·  JULY 2026"
     apply_style(tf, font_name=HEADER_FONT, size=Pt(14), color=THG_BLUE, bold=True)
 
     # --- Slide 2: Recovery Protocol ---
@@ -177,6 +177,34 @@ def create_presentation():
     tf.paragraphs[4].runs[0].font.size = Pt(24)
     tf.paragraphs[4].runs[0].font.color.rgb = THG_BLUE
     tf.paragraphs[4].runs[0].font.bold = True
+
+    # --- Slide 6: Status Tracking & Reporting ---
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    add_header(slide, "Status Tracking & Reporting")
+
+    intro = slide.shapes.add_textbox(Inches(0.5), Inches(1.4), Inches(12), Inches(0.6))
+    tf = intro.text_frame
+    p = tf.add_paragraph()
+    p.text = "Every Scream Test run now produces a live, human-readable status view — no manual spreadsheet updates."
+    apply_style(tf, font_name=BODY_FONT, size=Pt(18), color=THG_GREY)
+
+    layers = [
+        ("1. state.json", "Machine record per dataset: backup location, Scream Test start time, current status (active / restored / deleted)."),
+        ("2. status_report.md", "Auto-regenerated Markdown report on every workspace sync — per-dataset days elapsed and a Phase D readiness flag."),
+        ("3. Audit workbook stays clean", "Status is never pasted back into the Excel control file; the report is regenerated from live state each time (constitution §13.3).")
+    ]
+    for i, (title, text) in enumerate(layers):
+        top = Inches(2.3 + (i * 1.5))
+        tbox = slide.shapes.add_textbox(Inches(0.5), top, Inches(12), Inches(0.5))
+        tf = tbox.text_frame
+        p = tf.add_paragraph()
+        p.text = title
+        apply_style(tf, font_name=HEADER_FONT, size=Pt(24), color=THG_BLUE, bold=True)
+        mbox = slide.shapes.add_textbox(Inches(0.5), top + Inches(0.4), Inches(12), Inches(0.8))
+        tf = mbox.text_frame
+        p = tf.add_paragraph()
+        p.text = text
+        apply_style(tf, font_name=BODY_FONT, size=Pt(18), color=THG_DARK)
 
     prs.save("BigQuery_Housekeeping_Process.pptx")
 
