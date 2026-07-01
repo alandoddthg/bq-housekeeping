@@ -102,19 +102,26 @@ def build_report(state, context, retention_days):
     return "\n".join(lines)
 
 
+def generate(output_path=None, retention_days=7):
+    """Build the report from live state and write it to output_path if given. Returns the report text."""
+    state = load_state()
+    context = load_audit_context()
+    report = build_report(state, context, retention_days)
+    if output_path:
+        with open(output_path, "w") as f:
+            f.write(report)
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate a human-readable status report from state.json")
     parser.add_argument("--retention-days", type=int, default=7, help="Monitoring period used to flag Phase D readiness (default: 7)")
     parser.add_argument("--output", help="Write report to this file instead of stdout")
     args = parser.parse_args()
 
-    state = load_state()
-    context = load_audit_context()
-    report = build_report(state, context, args.retention_days)
+    report = generate(output_path=args.output, retention_days=args.retention_days)
 
     if args.output:
-        with open(args.output, "w") as f:
-            f.write(report)
         print(f"Report written to {args.output}")
     else:
         print(report)

@@ -5,6 +5,7 @@ import os
 import datetime
 import time
 import argparse
+import bq_status_report
 
 # --- CONFIGURATION ---
 EXCEL_FILE = "20260624_Data_Estate_Cleanup_Audit xlsx.xlsx"
@@ -12,6 +13,7 @@ SHEET_NAME = "BQ-added-Data"
 BACKUP_DIR = "backups"
 LOG_FILE = "decommission.log"
 STATE_FILE = "state.json"
+STATUS_REPORT_FILE = "status_report.md"
 # Critical service accounts to keep (Optional)
 # Org Admin access is inherited via Org-level IAM and does not need listing here
 SAFE_PRINCIPALS = []
@@ -130,7 +132,8 @@ def delete_dataset(project, dataset, dry_run=False):
 
 def sync_workspace(bucket):
     log(f"Synchronizing workspace to gs://{bucket}/workspace/...")
-    files_to_sync = [STATE_FILE, LOG_FILE, "PROCESS.md"]
+    bq_status_report.generate(output_path=STATUS_REPORT_FILE)
+    files_to_sync = [STATE_FILE, LOG_FILE, STATUS_REPORT_FILE, "PROCESS.md"]
     for f in files_to_sync:
         if os.path.exists(f):
             run_command(f"gsutil cp {f} gs://{bucket}/workspace/{f}")

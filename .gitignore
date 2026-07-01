@@ -1,5 +1,6 @@
 *.log
 state.json
+status_report.md
 backups/
 temp_*.json
 update_*.json

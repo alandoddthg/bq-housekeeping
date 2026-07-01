@@ -83,5 +83,17 @@ class TestBQDecommissioner(unittest.TestCase):
         mock_scream.assert_called_once()
         mock_sync.assert_called_once()
 
+    @patch('bq_data_decommissioner.run_command')
+    @patch('bq_data_decommissioner.bq_status_report.generate')
+    @patch('os.path.exists')
+    def test_sync_workspace_regenerates_status_report(self, mock_exists, mock_generate, mock_run_cmd):
+        mock_exists.return_value = True
+
+        bq_dec.sync_workspace("bucket")
+
+        mock_generate.assert_called_once_with(output_path=bq_dec.STATUS_REPORT_FILE)
+        synced = [call.args[0] for call in mock_run_cmd.call_args_list]
+        self.assertTrue(any(bq_dec.STATUS_REPORT_FILE in cmd for cmd in synced))
+
 if __name__ == '__main__':
     unittest.main()
