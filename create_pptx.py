@@ -1,8 +1,23 @@
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_SHAPE
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE
+import pandas as pd
+
+EXCEL_FILE = "20260624_Data_Estate_Cleanup_Audit xlsx.xlsx"
+SHEET_NAME = "BQ-added-Data"
+
+
+def load_tranche1_targets():
+    df = pd.read_excel(EXCEL_FILE, sheet_name=SHEET_NAME)
+    return df[
+        df['Tranche'].astype(str).str.startswith("Tranche 1:")
+        & df['Defensible Deletion Status'].astype(str).str.startswith("CONFIRMED")
+    ].copy()
+
 
 def create_presentation():
     prs = Presentation()
@@ -16,6 +31,7 @@ def create_presentation():
     THG_DARK = RGBColor(0x16, 0x20, 0x2E)
     THG_GREY = RGBColor(0x5A, 0x66, 0x75)
     THG_GREEN = RGBColor(0x1E, 0x8E, 0x5A)
+    THG_RED = RGBColor(0xC5, 0x22, 0x1F)  # BRAG "Red" - critical/action needed
     WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
     # --- FONTS ---
@@ -23,6 +39,10 @@ def create_presentation():
     BODY_FONT = "Open Sans"
 
     def apply_style(text_frame, font_name=BODY_FONT, size=Pt(18), color=THG_DARK, bold=False, align=PP_ALIGN.LEFT):
+        # word_wrap/auto_size must be explicit - without them, long lines don't wrap
+        # and run off the shape (and sometimes off the slide) instead of flowing to a new line.
+        text_frame.word_wrap = True
+        text_frame.auto_size = MSO_AUTO_SIZE.NONE
         for paragraph in text_frame.paragraphs:
             paragraph.alignment = align
             for run in paragraph.runs:
@@ -113,49 +133,80 @@ def create_presentation():
                 cell.fill.fore_color.rgb = RGBColor(240, 240, 240)
                 cell.text_frame.paragraphs[0].font.bold = True
 
-    # --- Slide 4: Access Profiles & Risk ---
+    # --- Slide 4: Access Profiles & Cleanup Risk (Tranche 1 candidates) ---
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    add_header(slide, "Access Profiles & Cleanup Risk")
-    
-    left_body = slide.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(6), Inches(5))
-    tf = left_body.text_frame
-    p = tf.add_paragraph()
-    p.text = "Key Account Profiles Identified:"
-    p.font.bold = True
-    p.font.size = Pt(24)
-    
-    profiles = [
-        "Service Accounts: finops-scheduler, quota-collector, argus-investigator",
-        "WIF Principals: GitHub Actions (thg-finops-prod)",
-        "User Groups: Data & AI (Looker), FinOps Team, Product Owners",
-        "Orphaned: 1,300+ datasets have ZERO write activity in 180+ days"
-    ]
-    for pf in profiles:
-        p = tf.add_paragraph()
-        p.text = "· " + pf
-        p.font.size = Pt(18)
-        p.space_before = Pt(10)
+    add_header(slide, "Access Profiles & Cleanup Risk: Tranche 1 Candidates")
 
-    # Youngest Access (Most Recent)
-    right_body = slide.shapes.add_textbox(Inches(7), Inches(1.5), Inches(5.5), Inches(5))
-    tf = right_body.text_frame
+    t1 = load_tranche1_targets()
+    total_datasets = len(t1)
+    total_size = t1['Size (GB)'].sum()
+    total_cost = t1['Monthly Cost ($)'].sum()
+
+    stat_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.3), Inches(12), Inches(0.45))
+    tf = stat_box.text_frame
     p = tf.add_paragraph()
-    p.text = "Recent Activity (Last 24h):"
-    p.font.bold = True
-    p.font.size = Pt(24)
-    p.font.color.rgb = THG_BLUE
-    
-    recent = [
-        "thg-data-personify: Personify (Active)",
-        "thg-ingenuity: analytics_376116958 (Active)",
-        "thg-ml-dev: chatbot_conversations (Active)",
-        "thg-cx-data: hermes_events (Active)"
-    ]
-    for r in recent:
-        p = tf.add_paragraph()
-        p.text = "· " + r
-        p.font.size = Pt(18)
-        p.space_before = Pt(10)
+    p.text = (
+        f"{total_datasets} confirmed candidates  ·  {total_size:,.0f} GB  ·  "
+        f"${total_cost:,.2f}/mo  ·  zero reads/writes in 12+ months"
+    )
+    apply_style(tf, font_name=BODY_FONT, size=Pt(16), color=THG_GREY, bold=True)
+
+    chart_title = slide.shapes.add_textbox(Inches(0.5), Inches(1.85), Inches(12), Inches(0.35))
+    tf = chart_title.text_frame
+    p = tf.add_paragraph()
+    p.text = "Top 15 by Days Since Last Activity"
+    apply_style(tf, font_name=HEADER_FONT, size=Pt(18), color=THG_DARK, bold=True)
+
+    top_by_activity = t1.sort_values("Days Since Last Activity", ascending=False).head(15)
+    chart_data = CategoryChartData()
+    chart_data.categories = list(top_by_activity['Dataset'])
+    chart_data.add_series('Days Since Last Activity', [float(v) for v in top_by_activity['Days Since Last Activity']])
+
+    graphic_frame = slide.shapes.add_chart(
+        XL_CHART_TYPE.BAR_CLUSTERED, Inches(0.5), Inches(2.25), Inches(12), Inches(2.35), chart_data
+    )
+    chart = graphic_frame.chart
+    chart.has_legend = False
+    plot = chart.plots[0]
+    plot.has_data_labels = True
+    plot.data_labels.font.size = Pt(9)
+    series = plot.series[0]
+    series.format.fill.solid()
+    series.format.fill.fore_color.rgb = THG_RED
+    chart.category_axis.tick_labels.font.size = Pt(9)
+    chart.value_axis.tick_labels.font.size = Pt(9)
+
+    table_title = slide.shapes.add_textbox(Inches(0.5), Inches(4.75), Inches(12), Inches(0.35))
+    tf = table_title.text_frame
+    p = tf.add_paragraph()
+    p.text = "Biggest Offenders by Monthly Cost"
+    apply_style(tf, font_name=HEADER_FONT, size=Pt(18), color=THG_DARK, bold=True)
+
+    top_by_cost = t1.sort_values("Monthly Cost ($)", ascending=False).head(6)
+    rows, cols = len(top_by_cost) + 1, 5
+    table = slide.shapes.add_table(rows, cols, Inches(0.5), Inches(5.15), Inches(12), Inches(2)).table
+    headers = ["Project", "Dataset", "Days Inactive", "Size (GB)", "Monthly Cost ($)"]
+    for i, h in enumerate(headers):
+        cell = table.cell(0, i)
+        cell.text = h
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = THG_DARK
+        cell.text_frame.paragraphs[0].font.color.rgb = WHITE
+        cell.text_frame.paragraphs[0].font.bold = True
+        cell.text_frame.paragraphs[0].font.size = Pt(13)
+
+    for r, (_, row) in enumerate(top_by_cost.iterrows()):
+        values = [
+            row['Project'],
+            row['Dataset'],
+            f"{int(row['Days Since Last Activity'])}",
+            f"{row['Size (GB)']:,.2f}",
+            f"{row['Monthly Cost ($)']:,.2f}",
+        ]
+        for c, val in enumerate(values):
+            cell = table.cell(r + 1, c)
+            cell.text = str(val)
+            cell.text_frame.paragraphs[0].font.size = Pt(13)
 
     # --- Slide 5: Execution & Repository ---
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -194,13 +245,13 @@ def create_presentation():
         ("3. Audit workbook stays clean", "Status is never pasted back into the Excel control file; the report is regenerated from live state each time (constitution §13.3).")
     ]
     for i, (title, text) in enumerate(layers):
-        top = Inches(2.3 + (i * 1.5))
+        top = Inches(2.3 + (i * 1.6))
         tbox = slide.shapes.add_textbox(Inches(0.5), top, Inches(12), Inches(0.5))
         tf = tbox.text_frame
         p = tf.add_paragraph()
         p.text = title
         apply_style(tf, font_name=HEADER_FONT, size=Pt(24), color=THG_BLUE, bold=True)
-        mbox = slide.shapes.add_textbox(Inches(0.5), top + Inches(0.4), Inches(12), Inches(0.8))
+        mbox = slide.shapes.add_textbox(Inches(0.5), top + Inches(0.4), Inches(12), Inches(1.0))
         tf = mbox.text_frame
         p = tf.add_paragraph()
         p.text = text
