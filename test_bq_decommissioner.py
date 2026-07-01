@@ -34,6 +34,19 @@ class TestBQDecommissioner(unittest.TestCase):
         mock_file.assert_called_with(path, "w")
 
     @patch('bq_data_decommissioner.run_command')
+    @patch('os.remove')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_backup_dataset_gcs_empty_stdout_still_succeeds(self, mock_file, mock_remove, mock_run_cmd):
+        # gsutil cp writes its success message to stderr, so stdout is "" on a successful
+        # upload - backup_dataset must not treat that as a failed backup.
+        mock_run_cmd.side_effect = ['{"access": []}', '']
+
+        path = bq_dec.backup_dataset("project", "dataset", bucket="my-bucket")
+
+        self.assertEqual(path, "gs://my-bucket/backups/project_dataset_backup.json")
+        mock_remove.assert_called_once()
+
+    @patch('bq_data_decommissioner.run_command')
     @patch('builtins.open', new_callable=mock_open, read_data='{"access": [{"role": "OWNER", "userByEmail": "admin@thg.com"}, {"role": "READER", "userByEmail": "user@thg.com"}]}')
     @patch('os.remove')
     def test_apply_scream_test_logic(self, mock_remove, mock_file, mock_run_cmd):

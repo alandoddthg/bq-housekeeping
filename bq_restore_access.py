@@ -38,7 +38,9 @@ def restore_dataset(key, info, dry_run=False):
     # 1. Download if GCS
     if backup_path.startswith("gs://"):
         download_cmd = f"gsutil cp {backup_path} {local_backup}"
-        if not run_command(download_cmd, dry_run):
+        # gsutil writes its success message to stderr, so stdout is "" (falsy but not an
+        # error) on a successful copy - must check for None, not truthiness.
+        if run_command(download_cmd, dry_run) is None:
             return False
     else:
         local_backup = backup_path

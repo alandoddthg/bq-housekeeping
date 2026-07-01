@@ -60,7 +60,9 @@ def backup_dataset(project, dataset, dry_run=False, bucket=None):
             with open(temp_file, "w") as f:
                 f.write(output)
             upload_cmd = f"gsutil cp {temp_file} {path}"
-            if run_command(upload_cmd):
+            # gsutil writes its success message to stderr, so stdout is "" (falsy but not
+            # an error) on a successful copy - must check for None, not truthiness.
+            if run_command(upload_cmd) is not None:
                 os.remove(temp_file)
                 return path
         else:
@@ -74,7 +76,7 @@ def apply_scream_test(project, dataset, backup_path, dry_run=False):
     
     # 1. Label the dataset for visibility
     label_cmd = f"bq update --set_label cleanup-status:scream-test {project}:{dataset}"
-    if not run_command(label_cmd, dry_run):
+    if run_command(label_cmd, dry_run) is None:
         log(f"WARNING: Failed to label {project}:{dataset} - continuing with access restriction")
 
     if dry_run:
@@ -85,7 +87,7 @@ def apply_scream_test(project, dataset, backup_path, dry_run=False):
     local_policy_file = f"temp_policy_{project}_{dataset}.json"
     if backup_path.startswith("gs://"):
         download_cmd = f"gsutil cp {backup_path} {local_policy_file}"
-        if not run_command(download_cmd):
+        if run_command(download_cmd) is None:
             return False
     else:
         local_policy_file = backup_path
@@ -125,7 +127,7 @@ def apply_scream_test(project, dataset, backup_path, dry_run=False):
 def delete_dataset(project, dataset, dry_run=False):
     log(f"PERMANENTLY DELETING {project}:{dataset}...")
     cmd = f"bq rm -r -f {project}:{dataset}"
-    if run_command(cmd, dry_run):
+    if run_command(cmd, dry_run) is not None:
         log(f"Deleted {project}:{dataset}")
         return True
     return False
