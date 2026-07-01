@@ -130,6 +130,26 @@ def delete_dataset(project, dataset, dry_run=False):
         return True
     return False
 
+def check_backup_bucket_access(bucket):
+    """Verify we can write to the backup bucket before processing any targets.
+
+    Without this, a permissions problem surfaces identically on every single dataset
+    (as happened on the first live Tranche 1 run: 30/30 backups failed with the same
+    403), wasting the full run instead of failing fast before touching anything.
+    """
+    test_object = f"gs://{bucket}/.scream_test_write_check"
+    test_file = "temp_write_check.tmp"
+    with open(test_file, "w") as f:
+        f.write("write-access-check")
+    try:
+        if run_command(f"gsutil cp {test_file} {test_object}") is None:
+            return False
+        run_command(f"gsutil rm {test_object}")
+        return True
+    finally:
+        if os.path.exists(test_file):
+            os.remove(test_file)
+
 def sync_workspace(bucket):
     log(f"Synchronizing workspace to gs://{bucket}/workspace/...")
     bq_status_report.generate(output_path=STATUS_REPORT_FILE)
@@ -226,6 +246,13 @@ def main():
     
     if targets.empty:
         print(f"No confirmed targets found for {selected_tranche}.")
+        return
+
+    if not args.dry_run and not check_backup_bucket_access(args.backup_bucket):
+        log(
+            f"ERROR: No write access to gs://{args.backup_bucket}/ - aborting before "
+            f"touching any dataset access. Check IAM permissions (storage.objects.create) and retry."
+        )
         return
 
     log(f"Processing {len(targets)} targets for {selected_tranche}.")

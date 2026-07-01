@@ -60,9 +60,11 @@ class TestBQDecommissioner(unittest.TestCase):
     @patch('bq_data_decommissioner.backup_dataset')
     @patch('bq_data_decommissioner.apply_scream_test')
     @patch('bq_data_decommissioner.sync_workspace')
-    def test_main_tranche_processing(self, mock_sync, mock_scream, mock_backup, mock_file, mock_exists, mock_pd):
+    @patch('bq_data_decommissioner.check_backup_bucket_access')
+    def test_main_tranche_processing(self, mock_bucket_check, mock_sync, mock_scream, mock_backup, mock_file, mock_exists, mock_pd):
         mock_exists.side_effect = lambda x: x in [bq_dec.EXCEL_FILE, bq_dec.STATE_FILE]
-        
+        mock_bucket_check.return_value = True
+
         # Mocking DataFrame
         df = pd.DataFrame({
             'Project': ['p1'],
@@ -75,13 +77,62 @@ class TestBQDecommissioner(unittest.TestCase):
         mock_pd.return_value = df
         mock_backup.return_value = "path/to/backup"
         mock_scream.return_value = True
-        
+
         with patch('argparse.ArgumentParser.parse_args', return_value=MagicMock(tranche='1', dry_run=False, phase_d=False, list_tranches=False, backup_bucket='bucket')):
             bq_dec.main()
-            
+
+        mock_bucket_check.assert_called_once_with('bucket')
         mock_backup.assert_called_once()
         mock_scream.assert_called_once()
         mock_sync.assert_called_once()
+
+    @patch('bq_data_decommissioner.pd.read_excel')
+    @patch('bq_data_decommissioner.backup_dataset')
+    @patch('bq_data_decommissioner.check_backup_bucket_access')
+    def test_main_aborts_when_bucket_inaccessible(self, mock_bucket_check, mock_backup, mock_pd):
+        mock_bucket_check.return_value = False
+
+        df = pd.DataFrame({
+            'Project': ['p1'],
+            'Dataset': ['d1'],
+            'Tranche': ['Tranche 1: Abandoned'],
+            'Defensible Deletion Status': ['CONFIRMED'],
+            'Size (GB)': [10],
+            'Monthly Cost ($)': [0.2]
+        })
+        mock_pd.return_value = df
+
+        with patch('argparse.ArgumentParser.parse_args', return_value=MagicMock(tranche='1', dry_run=False, phase_d=False, list_tranches=False, backup_bucket='bucket')):
+            bq_dec.main()
+
+        mock_bucket_check.assert_called_once_with('bucket')
+        mock_backup.assert_not_called()
+
+    @patch('bq_data_decommissioner.run_command')
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('os.remove')
+    def test_check_backup_bucket_access_success(self, mock_remove, mock_file, mock_run_cmd):
+        mock_run_cmd.return_value = "Success"
+
+        result = bq_dec.check_backup_bucket_access("bucket")
+
+        self.assertTrue(result)
+        upload_calls = [c for c in mock_run_cmd.mock_calls if "gsutil cp" in str(c)]
+        cleanup_calls = [c for c in mock_run_cmd.mock_calls if "gsutil rm" in str(c)]
+        self.assertTrue(len(upload_calls) > 0)
+        self.assertTrue(len(cleanup_calls) > 0)
+
+    @patch('bq_data_decommissioner.run_command')
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('os.remove')
+    def test_check_backup_bucket_access_failure(self, mock_remove, mock_file, mock_run_cmd):
+        mock_run_cmd.return_value = None
+
+        result = bq_dec.check_backup_bucket_access("bucket")
+
+        self.assertFalse(result)
+        cleanup_calls = [c for c in mock_run_cmd.mock_calls if "gsutil rm" in str(c)]
+        self.assertEqual(len(cleanup_calls), 0)
 
     @patch('bq_data_decommissioner.run_command')
     @patch('bq_data_decommissioner.bq_status_report.generate')
